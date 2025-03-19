@@ -53,6 +53,7 @@ pdf-reports/
 *.pptx
 *.txt
 !requirements.txt
+download_files.py
 
 # Logs
 *.log
