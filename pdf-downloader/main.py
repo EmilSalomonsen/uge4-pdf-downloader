@@ -1,100 +1,150 @@
-import asyncio
-import logging
-import argparse
-from pathlib import Path
-from src.excel_handler import ExcelHandler
-from src.downloader import PDFDownloader
-from src.status_tracker import StatusTracker
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 
-async def main():
-    parser = argparse.ArgumentParser(description='Download PDFs from Excel file URLs')
-    parser.add_argument('--excel', required=True, help='Path to Excel file')
-    parser.add_argument('--output', required=True, help='Output directory for PDFs')
-    parser.add_argument('--report', required=True, help='Output directory for status report')
-    parser.add_argument('--max-concurrent', type=int, default=10, help='Maximum concurrent downloads')
-    parser.add_argument('--limit', type=int, default=None, help='Limit number of successful downloads')
+"""
+PDF Downloader - Hovedscript
+
+Dette script koordinerer processen med at downloade PDF-rapporter fra en Excel-fil.
+Det håndterer:
+- Læsning af URLs fra Excel
+- Asynkron nedlasting af PDFs
+- Status tracking og rapportering
+- Fejlhåndtering og logging
+
+Brug:
+    python main.py --excel "sti/til/excel.xlsx" --output "sti/til/output" --report "sti/til/reports"
+"""
+
+import asyncio
+import argparse
+import logging
+from pathlib import Path
+from datetime import datetime
+import sys
+import os
+
+# Tilføj src mappen til Python path
+sys.path.append(os.path.join(os.path.dirname(__file__), 'src'))
+
+from excel_handler import ExcelHandler
+from downloader import PDFDownloader
+from status_tracker import StatusTracker
+
+def setup_logging():
+    """
+    Opsætter logging systemet med både fil og konsol output.
+    """
+    # Opret logs mappe hvis den ikke findes
+    log_dir = Path('logs')
+    log_dir.mkdir(exist_ok=True)
     
-    args = parser.parse_args()
+    # Generer timestamp for log filnavn
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    log_file = log_dir / f'pdf_downloader_{timestamp}.log'
     
-    # Setup logging
+    # Konfigurer logging format
     logging.basicConfig(
         level=logging.INFO,
-        format='%(asctime)s - %(levelname)s - %(message)s'
+        format='%(asctime)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.FileHandler(log_file),
+            logging.StreamHandler()
+        ]
     )
-    
-    try:
-        # Valider at Excel filen eksisterer
-        excel_path = Path(args.excel)
-        if not excel_path.exists():
-            raise FileNotFoundError(f"Excel file not found: {args.excel}")
-        
-        # Opret output og report directories hvis de ikke eksisterer
-        output_dir = Path(args.output)
-        report_dir = Path(args.report)
-        output_dir.mkdir(parents=True, exist_ok=True)
-        report_dir.mkdir(parents=True, exist_ok=True)
 
-        logging.info(f"Starting PDF download process")
-        logging.info(f"Excel file: {args.excel}")
-        logging.info(f"Output directory: {args.output}")
-        logging.info(f"Report directory: {args.report}")
-        logging.info(f"Max concurrent downloads: {args.max_concurrent}")
-        if args.limit:
-            logging.info(f"Target successful downloads: {args.limit} files")
+def parse_arguments():
+    """
+    Parser kommandolinje argumenter.
+    
+    Returns:
+        argparse.Namespace: Parsede argumenter
+    """
+    parser = argparse.ArgumentParser(description='Download PDF rapporter fra Excel fil')
+    
+    # Påkrævede argumenter
+    parser.add_argument('--excel', required=True, help='Sti til Excel fil med URLs')
+    parser.add_argument('--output', required=True, help='Mappe hvor PDFs skal gemmes')
+    parser.add_argument('--report', required=True, help='Mappe hvor status rapporter skal gemmes')
+    
+    # Valgfrie argumenter
+    parser.add_argument('--max-concurrent', type=int, default=10,
+                      help='Maksimalt antal samtidige downloads (default: 10)')
+    parser.add_argument('--limit', type=int, default=10,
+                      help='Maksimalt antal succesfulde downloads (default: 10)')
+    parser.add_argument('--timeout', type=int, default=30,
+                      help='Timeout i sekunder for hver download (default: 30)')
+    
+    return parser.parse_args()
+
+def validate_paths(args):
+    """
+    Validerer at alle angivne stier eksisterer og er tilgængelige.
+    
+    Args:
+        args (argparse.Namespace): Parsede argumenter
+        
+    Raises:
+        FileNotFoundError: Hvis en sti ikke findes
+        PermissionError: Hvis der ikke er adgang til en sti
+    """
+    # Tjek Excel fil
+    if not os.path.exists(args.excel):
+        raise FileNotFoundError(f"Excel fil ikke fundet: {args.excel}")
+    
+    # Opret output mappe hvis den ikke findes
+    os.makedirs(args.output, exist_ok=True)
+    
+    # Opret report mappe hvis den ikke findes
+    os.makedirs(args.report, exist_ok=True)
+
+async def main():
+    """
+    Hovedfunktion der koordinerer hele download processen.
+    """
+    try:
+        # Opsæt logging
+        setup_logging()
+        logging.info("Starter PDF Downloader")
+        
+        # Parse og valider argumenter
+        args = parse_arguments()
+        validate_paths(args)
         
         # Initialiser komponenter
         excel_handler = ExcelHandler(args.excel)
-        downloader = PDFDownloader(args.output, max_concurrent=args.max_concurrent)
+        downloader = PDFDownloader(args.output, args.max_concurrent)
         status_tracker = StatusTracker(args.report)
         
-        # Læs alle URLs
-        all_urls = excel_handler.get_urls()
-        logging.info(f"Found {len(all_urls)} total URLs")
+        # Hent URLs fra Excel
+        urls = excel_handler.get_urls()
+        if not urls:
+            logging.error("Ingen URLs fundet i Excel filen")
+            return
         
-        results = []
-        successful_downloads = 0
-        batch_size = 20  # Process URLs i batches
-        current_index = 0
+        logging.info(f"Fundet {len(urls)} URLs at downloade")
         
-        while successful_downloads < args.limit and current_index < len(all_urls):
-            # Tag næste batch af URLs
-            end_index = min(current_index + batch_size, len(all_urls))
-            current_batch = all_urls[current_index:end_index]
-            
-            # Download batch
-            batch_results = await downloader.download_all(current_batch)
-            results.extend(batch_results)
-            
-            # Tæl succesfulde downloads
-            batch_successful = sum(1 for r in batch_results 
-                                 if r['status'] in ['success', 'success_alternative'])
-            successful_downloads += batch_successful
-            
-            logging.info(f"Successful downloads so far: {successful_downloads}/{args.limit}")
-            current_index = end_index
-            
-            if successful_downloads >= args.limit:
-                logging.info(f"Reached target of {args.limit} successful downloads")
-                break
+        # Start download process
+        results = await downloader.download_pdfs(urls, args.limit, args.timeout)
         
         # Opdater status og generer rapport
-        status_tracker.update_batch(results)
-        report_path = status_tracker.generate_report()
+        for result in results:
+            status_tracker.update_status(
+                result['br_number'],
+                result['status']
+            )
         
-        # Print summary
-        summary = status_tracker.get_summary()
-        print("\nDownload Summary:")
-        print(f"Total attempts: {summary['total']}")
-        print(f"Successfully downloaded: {summary['successful']}")
-        print(f"Failed: {summary['failed']}")
-        print(f"Success rate: {summary['success_rate']:.1f}%")
-        print(f"\nStatus report saved to: {report_path}")
-        
-        logging.info("Process completed successfully")
+        status_tracker.generate_report()
+        logging.info("Download process afsluttet")
         
     except Exception as e:
-        logging.error(f"Error: {e}")
+        logging.error(f"Fejl under kørsel: {str(e)}")
         raise
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        logging.info("Program afbrudt af brugeren")
+    except Exception as e:
+        logging.error(f"Uventet fejl: {str(e)}")
+        sys.exit(1)

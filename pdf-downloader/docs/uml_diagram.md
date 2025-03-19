@@ -1,89 +1,66 @@
-# UML Class Diagram - PDF Downloader
+# UML Klasse Diagram
 
 ```mermaid
 classDiagram
     class ExcelHandler {
-        -str file_path
-        -DataFrame data
-        +__init__(file_path: str)
-        +validate_columns()
-        +get_urls() List[Dict]
-        -_read_excel()
-        -_validate_data()
+        +read_excel_file(file_path: str)
+        +validate_data()
+        +get_urls()
+        -_validate_columns()
+        -_extract_urls()
     }
 
     class PDFDownloader {
-        -str output_dir
-        -int max_concurrent
-        -Session session
-        +__init__(output_dir: str, max_concurrent: int)
-        +download_all(urls: List[Dict]) List[DownloadResult]
-        +download_single(url_info: Dict) DownloadResult
-        -_try_alternative_url(url_info: Dict)
-        -_save_pdf(content: bytes, filename: str)
-        -_create_session()
+        +download_pdfs(urls: List[Dict])
+        +set_max_concurrent(limit: int)
+        +set_timeout(seconds: int)
+        -_download_single(session: ClientSession, url_info: Dict)
+        -_try_download(session: ClientSession, url: str)
+        -_save_pdf(content: bytes, filename: Path)
+        -_validate_pdf(content: bytes)
     }
 
     class StatusTracker {
-        -List[DownloadResult] results
-        -str report_path
-        +__init__(report_path: str)
-        +update(result: DownloadResult)
+        +update_status(br_number: str, status: str)
         +generate_report()
-        +export_to_excel()
-        -_format_results()
+        +save_report()
+        -_create_report_dataframe()
+        -_format_status(status: str)
     }
 
-    class DownloadResult {
-        +str br_number
-        +str primary_url
-        +str alternative_url
-        +str status
-        +str error_message
-        +datetime timestamp
+    class Main {
+        +run()
+        -_setup_logging()
+        -_parse_arguments()
+        -_validate_paths()
     }
 
-    class Utils {
-        +validate_url(url: str) bool
-        +create_directory(path: str)
-        +setup_logging()
-        +sanitize_filename(name: str) str
-    }
-
-    PDFDownloader ..> DownloadResult
-    StatusTracker ..> DownloadResult
-    PDFDownloader ..> Utils
-    ExcelHandler ..> Utils
-    StatusTracker ..> Utils
+    Main --> ExcelHandler
+    Main --> PDFDownloader
+    Main --> StatusTracker
+    PDFDownloader --> StatusTracker
 ```
 
-Dette diagram viser:
+## Klassernes Ansvar
 
-1. **ExcelHandler**
-   - Håndterer læsning og validering af Excel filer
-   - Ekstraherer URL information
-   - Validerer nødvendige kolonner
+### ExcelHandler
+- Håndterer læsning og validering af Excel-filer
+- Ekstraherer URLs og metadata
+- Validerer data format og kolonner
 
-2. **PDFDownloader**
-   - Håndterer concurrent downloads
-   - Implementerer fallback til alternative URLs
-   - Gemmer PDFs med korrekt navngivning
+### PDFDownloader
+- Håndterer asynkron nedlasting af PDF-filer
+- Implementerer retry logik og fejlhåndtering
+- Validerer PDF indhold
+- Håndterer concurrent downloads
 
-3. **StatusTracker**
-   - Holder styr på download status
-   - Genererer statusrapporter
-   - Eksporterer resultater til Excel
+### StatusTracker
+- Registrerer download status
+- Genererer og gemmer status rapporter
+- Formaterer status data
 
-4. **DownloadResult**
-   - Data klasse til at holde information om hver download
-   - Inkluderer status, fejlbeskeder og timestamps
-
-5. **Utils**
-   - Hjælpefunktioner der bruges på tværs af klasserne
-   - URL validering, filhåndtering, logging
-
-**Relationer:**
-- PDFDownloader og StatusTracker bruger DownloadResult til at kommunikere resultater
-- Alle klasser bruger Utils for fælles funktionalitet
-- ExcelHandler leverer data til PDFDownloader
-- StatusTracker modtager resultater fra PDFDownloader
+### Main
+- Koordinerer program flow
+- Håndterer argument parsing
+- Sætter op logging
+- Validerer input/output paths
