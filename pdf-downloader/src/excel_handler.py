@@ -112,15 +112,20 @@ class ExcelHandler:
         # Opret en kopi af original data
         metadata_df = self.df.copy()
         
-        # Tilføj download status kolonne (AT)
+        # Tilføj download status kolonne
         metadata_df['Download Status'] = 'Ikke downloadet'  # Default status
         
         # Opdater status baseret på download resultater
         for result in download_results:
             br_number = result['br_number']
-            success = result.get('success', False)
-            if success:
+            # Tjek om download var succesfuld (enten primær eller alternativ URL)
+            if result['status'] in ['success', 'success_alternative']:
                 metadata_df.loc[metadata_df['BRnum'] == br_number, 'Download Status'] = 'Downloadet'
+        
+        # Log antal downloadede filer
+        successful = (metadata_df['Download Status'] == 'Downloadet').sum()
+        total = len(metadata_df)
+        logging.info(f"Metadata generated: {successful}/{total} files marked as downloaded")
         
         return metadata_df
 
