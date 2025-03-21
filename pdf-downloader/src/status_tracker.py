@@ -122,3 +122,14 @@ class StatusTracker:
             'failed': total - successful,
             'success_rate': (successful / total) * 100 if total > 0 else 0
         }
+
+    def update_status(self, br_number: str, status: str) -> None:
+        """
+        Alias for update method to maintain compatibility.
+        """
+        result = {
+            'br_number': br_number,
+            'status': status,
+            'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        }
+        self.update(result)

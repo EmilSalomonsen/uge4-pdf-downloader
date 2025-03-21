@@ -31,42 +31,64 @@ class PDFDownloader:
         self.timeout = timeout
         self.output_dir.mkdir(parents=True, exist_ok=True)
         
-    async def download_all(self, urls: List[Dict]) -> List[Dict]:
+    async def download_pdfs(self, urls: List[Dict], limit: int = None, timeout: int = None) -> List[Dict]:
         """
         Downloader alle PDFs asynkront.
         
         Args:
             urls (List[Dict]): Liste af URL information dictionaries
+            limit (int, optional): Maksimalt antal succesfulde downloads
+            timeout (int, optional): Override default timeout
             
         Returns:
             List[Dict]: Liste af download resultater
         """
+        if timeout:
+            self.timeout = timeout
+            
         results = []
-        tasks = []  # Start med en tom liste
+        tasks = []
+        successful_downloads = 0
         
-        # Opret aiohttp session
-        async with aiohttp.ClientSession() as session:
-            with tqdm(total=len(urls), desc="Downloading PDFs") as pbar:
-                for url_info in urls:
-                    if len(tasks) >= self.max_concurrent:
-                        # Vent på en task er færdig før vi tilføjer en ny
-                        done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
-                        for task in done:
-                            results.append(await task)
-                        tasks = list(pending)  # Konverter pending set til liste
-                        pbar.update(len(done))
-                    
-                    # Tilføj ny download task
-                    task = asyncio.create_task(self.download_single(session, url_info))
-                    tasks.append(task)
+        # Opret aiohttp session med SSL verifikation deaktiveret for at håndtere ældre certifikater
+        connector = aiohttp.TCPConnector(ssl=False)
+        async with aiohttp.ClientSession(connector=connector) as session:
+            with tqdm(total=min(len(urls), limit if limit else len(urls)), 
+                     desc="Downloading PDFs") as pbar:
                 
-                # Vent på resterende tasks
-                if tasks:
-                    done, _ = await asyncio.wait(tasks)
-                    for task in done:
-                        results.append(await task)
-                    pbar.update(len(done))
-        
+                # Behandl URLs i batches for at undgå at overbelaste systemet
+                for i in range(0, len(urls), self.max_concurrent):
+                    if limit and successful_downloads >= limit:
+                        break
+                        
+                    # Tag næste batch af URLs
+                    batch = urls[i:i + self.max_concurrent]
+                    
+                    # Start downloads for denne batch
+                    batch_tasks = [
+                        asyncio.create_task(self.download_single(session, url_info))
+                        for url_info in batch
+                    ]
+                    
+                    # Vent på at alle downloads i batchen er færdige
+                    batch_results = await asyncio.gather(*batch_tasks, return_exceptions=True)
+                    
+                    # Behandl resultater
+                    for result in batch_results:
+                        if isinstance(result, Exception):
+                            logging.error(f"Download task failed: {str(result)}")
+                            continue
+                            
+                        results.append(result)
+                        if result['status'] in ['success', 'success_alternative']:
+                            successful_downloads += 1
+                            if limit and successful_downloads >= limit:
+                                pbar.update(1)
+                                break
+                                
+                        pbar.update(1)
+                        
+        logging.info(f"Download completed. Successfully downloaded {successful_downloads} PDFs")
         return results
     
     async def download_single(self, session: aiohttp.ClientSession, url_info: Dict) -> Dict:

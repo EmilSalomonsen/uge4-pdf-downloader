@@ -10,6 +10,7 @@ Det håndterer:
 - Asynkron nedlasting af PDFs
 - Status tracking og rapportering
 - Fejlhåndtering og logging
+- Generering af metadata i samme format som Metadata2006_2016.xlsx
 
 Brug:
     python main.py --excel "sti/til/excel.xlsx" --output "sti/til/output" --report "sti/til/reports"
@@ -112,7 +113,7 @@ async def main():
         
         # Initialiser komponenter
         excel_handler = ExcelHandler(args.excel)
-        downloader = PDFDownloader(args.output, args.max_concurrent)
+        downloader = PDFDownloader(args.output, args.max_concurrent, args.timeout)
         status_tracker = StatusTracker(args.report)
         
         # Hent URLs fra Excel
@@ -122,19 +123,23 @@ async def main():
             return
         
         logging.info(f"Fundet {len(urls)} URLs at downloade")
+        logging.info(f"Downloader maksimalt {args.limit} PDFs")
         
         # Start download process
-        results = await downloader.download_pdfs(urls, args.limit, args.timeout)
+        results = await downloader.download_pdfs(urls, limit=args.limit)
         
-        # Opdater status og generer rapport
-        for result in results:
-            status_tracker.update_status(
-                result['br_number'],
-                result['status']
-            )
+        # Generer og gem metadata
+        metadata = excel_handler.generate_metadata(results)
+        metadata_path = os.path.join(args.report, f'metadata_{datetime.now().strftime("%Y%m%d_%H%M%S")}.xlsx')
+        excel_handler.save_metadata(metadata, metadata_path)
         
+        # Generer status rapport
+        status_tracker.update_batch(results)
         status_tracker.generate_report()
-        logging.info("Download process afsluttet")
+        
+        # Log afslutning
+        successful = sum(1 for r in results if r['status'] in ['success', 'success_alternative'])
+        logging.info(f"Download process afsluttet. {successful} PDFs downloadet succesfuldt.")
         
     except Exception as e:
         logging.error(f"Fejl under kørsel: {str(e)}")
