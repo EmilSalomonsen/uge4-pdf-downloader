@@ -109,8 +109,11 @@ class ExcelHandler:
         if self.df is None:
             self._read_excel()
 
-        # Opret en kopi af original data
-        metadata_df = self.df.copy()
+        # Få liste af BR numre fra download resultaterne
+        processed_br_numbers = [result['br_number'] for result in download_results]
+        
+        # Filtrer DataFrame til kun at indeholde de processerede rækker
+        metadata_df = self.df[self.df['BRnum'].astype(str).isin(processed_br_numbers)].copy()
         
         # Tilføj download status kolonne
         metadata_df['Download Status'] = 'Ikke downloadet'  # Default status
@@ -120,7 +123,7 @@ class ExcelHandler:
             br_number = result['br_number']
             # Tjek om download var succesfuld (enten primær eller alternativ URL)
             if result['status'] in ['success', 'success_alternative']:
-                metadata_df.loc[metadata_df['BRnum'] == br_number, 'Download Status'] = 'Downloadet'
+                metadata_df.loc[metadata_df['BRnum'].astype(str) == br_number, 'Download Status'] = 'Downloadet'
         
         # Log antal downloadede filer
         successful = (metadata_df['Download Status'] == 'Downloadet').sum()

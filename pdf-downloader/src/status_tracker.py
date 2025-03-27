@@ -6,23 +6,23 @@ from datetime import datetime
 
 class StatusTracker:
     """
-    Holder styr på status for PDF downloads og genererer rapporter.
+    Holder styr på download status og genererer rapporter.
     
     Attributes:
+        report_dir (str): Sti hvor rapporter gemmes
         results (List[Dict]): Liste af download resultater
-        report_path (Path): Sti hvor rapport skal gemmes
     """
     
-    def __init__(self, report_path: str):
+    def __init__(self, report_dir: str):
         """
         Initialiserer StatusTracker.
         
         Args:
-            report_path (str): Sti hvor statusrapport skal gemmes
+            report_dir (str): Sti hvor rapporter skal gemmes
         """
-        self.report_path = Path(report_path)
+        self.report_dir = Path(report_dir)
+        self.report_dir.mkdir(parents=True, exist_ok=True)
         self.results = []
-        self.report_path.mkdir(parents=True, exist_ok=True)
         
     def update(self, result: Dict) -> None:
         """
@@ -34,93 +34,75 @@ class StatusTracker:
         self.results.append(result)
         logging.info(f"Updated status for {result['br_number']}: {result['status']}")
         
-    def update_batch(self, results: List[Dict]) -> None:
+    def update_batch(self, batch_results: list) -> None:
         """
         Opdaterer status med en batch af resultater.
         
         Args:
-            results (List[Dict]): Liste af download resultater
+            batch_results (List[Dict]): Liste af download resultater
         """
-        self.results.extend(results)
-        success_count = sum(1 for r in results if r['status'] in ['success', 'success_alternative'])
-        logging.info(f"Batch update: {success_count}/{len(results)} successful downloads")
-    
-    def generate_report(self) -> Path:
-        """
-        Genererer Excel rapport med download status.
+        self.results.extend(batch_results)
         
-        Returns:
-            Path: Sti til den genererede rapport
+    def generate_report(self) -> None:
+        """
+        Genererer en Excel rapport med download status.
         """
         if not self.results:
             logging.warning("No results to generate report from")
-            return None
-            
-        # Konverter resultater til DataFrame
-        df = pd.DataFrame(self.results)
-        
-        # Simplificer status til kun "Downloadet" eller "Ikke downloadet"
-        df['download_status'] = 'Ikke downloadet'  # Default værdi
-        success_mask = df['status'].isin(['success', 'success_alternative'])
-        df.loc[success_mask, 'download_status'] = 'Downloadet'
-        
-        # Organiser kolonner - kun de nødvendige kolonner som kunden ønsker
-        columns = [
-            'br_number',
-            'download_status',
-            'primary_url',
-            'alternative_url',
-            'timestamp'
-        ]
-        
-        df = df[columns]
-        
-        # Omdøb kolonner til dansk
-        column_names = {
-            'br_number': 'BR Nummer',
-            'download_status': 'Status',
-            'primary_url': 'Primær URL',
-            'alternative_url': 'Alternativ URL',
-            'timestamp': 'Tidspunkt'
-        }
-        df = df.rename(columns=column_names)
+            # Opret en tom rapport med korrekte kolonner
+            df = pd.DataFrame(columns=[
+                'BR Nummer',
+                'Status',
+                'Primær URL',
+                'Alternativ URL',
+                'Fejlbesked',
+                'Tidspunkt'
+            ])
+        else:
+            # Konverter resultater til DataFrame
+            df = pd.DataFrame([
+                {
+                    'BR Nummer': r['br_number'],
+                    'Status': r['status'],
+                    'Primær URL': r['primary_url'],
+                    'Alternativ URL': r['alternative_url'],
+                    'Fejlbesked': r['error_message'],
+                    'Tidspunkt': r['timestamp']
+                }
+                for r in self.results
+            ])
         
         # Gem rapport
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        report_filename = self.report_path / f"download_status_{timestamp}.xlsx"
-        df.to_excel(report_filename, index=False)
+        report_path = self.report_dir / f'download_status_{timestamp}.xlsx'
+        df.to_excel(report_path, index=False)
+        logging.info(f"Status report generated: {report_path}")
         
-        # Log statistik
-        total = len(df)
-        successful = (df['Status'] == 'Downloadet').sum()
-        logging.info(f"Report generated: {successful}/{total} files downloaded successfully")
-        logging.info(f"Report saved to: {report_filename}")
-        
-        return report_filename
-    
-    def get_summary(self) -> Dict:
+    def get_statistics(self) -> dict:
         """
-        Returnerer opsummering af download status.
+        Beregner statistik over download resultater.
         
         Returns:
-            Dict: Status opsummering
+            Dict: Statistik over downloads
         """
         if not self.results:
             return {
                 'total': 0,
-                'successful': 0,
-                'failed': 0,
-                'success_rate': 0
+                'success': 0,
+                'success_alternative': 0,
+                'failed': 0
             }
             
         total = len(self.results)
-        successful = sum(1 for r in self.results if r['status'] in ['success', 'success_alternative'])
+        success = sum(1 for r in self.results if r['status'] == 'success')
+        success_alt = sum(1 for r in self.results if r['status'] == 'success_alternative')
+        failed = sum(1 for r in self.results if r['status'] == 'failed')
         
         return {
             'total': total,
-            'successful': successful,
-            'failed': total - successful,
-            'success_rate': (successful / total) * 100 if total > 0 else 0
+            'success': success,
+            'success_alternative': success_alt,
+            'failed': failed
         }
 
     def update_status(self, br_number: str, status: str) -> None:

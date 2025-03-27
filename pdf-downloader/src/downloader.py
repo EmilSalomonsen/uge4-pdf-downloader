@@ -63,6 +63,9 @@ class PDFDownloader:
                         
                     # Tag næste batch af URLs
                     batch = urls[i:i + self.max_concurrent]
+                    if limit:
+                        remaining = limit - successful_downloads
+                        batch = batch[:remaining]
                     
                     # Start downloads for denne batch
                     batch_tasks = [
@@ -82,11 +85,11 @@ class PDFDownloader:
                         results.append(result)
                         if result['status'] in ['success', 'success_alternative']:
                             successful_downloads += 1
-                            if limit and successful_downloads >= limit:
-                                pbar.update(1)
-                                break
-                                
+                            
                         pbar.update(1)
+                        
+                        if limit and successful_downloads >= limit:
+                            break
                         
         logging.info(f"Download completed. Successfully downloaded {successful_downloads} PDFs")
         return results
@@ -113,21 +116,20 @@ class PDFDownloader:
         
         try:
             # Prøv primær URL
-            pdf_content = await self._try_download(session, url_info['primary_url'])
-            if pdf_content:
-                result['status'] = 'success'
-            else:
-                # Prøv alternativ URL hvis tilgængelig
-                if url_info['alternative_url']:
-                    pdf_content = await self._try_download(session, url_info['alternative_url'])
-                    if pdf_content:
-                        result['status'] = 'success_alternative'
-                    
-            if pdf_content:
-                # Gem PDF fil
-                filename = self.output_dir / f"{url_info['br_number']}.pdf"
-                await self._save_pdf(pdf_content, filename)
+            if url_info['primary_url']:
+                pdf_content = await self._try_download(session, url_info['primary_url'])
+                if pdf_content:
+                    result['status'] = 'success'
+                    await self._save_pdf(pdf_content, self.output_dir / f"{url_info['br_number']}.pdf")
+                    return result
             
+            # Prøv alternativ URL hvis tilgængelig
+            if url_info['alternative_url'] and not pdf_content:
+                pdf_content = await self._try_download(session, url_info['alternative_url'])
+                if pdf_content:
+                    result['status'] = 'success_alternative'
+                    await self._save_pdf(pdf_content, self.output_dir / f"{url_info['br_number']}.pdf")
+                    
         except Exception as e:
             result['error_message'] = str(e)
             logging.error(f"Error downloading {url_info['br_number']}: {e}")
@@ -146,7 +148,8 @@ class PDFDownloader:
             bytes: PDF indhold hvis success, None hvis fejl
         """
         try:
-            async with session.get(url, timeout=self.timeout) as response:
+            response = await session.get(url, timeout=self.timeout)
+            async with response as response:
                 if response.status == 200:
                     content_type = response.headers.get('content-type', '').lower()
                     if 'application/pdf' in content_type:
@@ -158,7 +161,7 @@ class PDFDownloader:
                 return None
         except Exception as e:
             logging.warning(f"Download failed for {url}: {e}")
-            return None
+            raise
     
     async def _save_pdf(self, content: bytes, filename: Path) -> None:
         """
